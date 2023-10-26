@@ -33,6 +33,38 @@ impl Token {
   }
 }
 
+#[derive(Clone, Copy)]
+enum Direction {
+  North = 0,
+  Northeast = 1,
+  East = 2,
+  Southeast = 3,
+  South = 4,
+  Southwest = 5,
+  West = 6,
+  Northwest = 7
+}
+
+impl Direction {
+  const DIRECTION_COUNT: u8 = 8;
+}
+
+impl From<u8> for Direction {
+  fn from(value: u8) -> Self {
+    match value {
+      0 => Self::North,
+      1 => Self::Northeast,
+      2 => Self::East,
+      3 => Self::Southeast,
+      4 => Self::South,
+      5 => Self::Southwest,
+      6 => Self::West,
+      7 => Self::Northwest,
+      _ => Self::North
+    }
+  }
+}
+
 enum Command {
   ChangeColor,
   MoveForward,
@@ -97,7 +129,7 @@ impl Command {
 
 struct Machine {
   location: (u8, u8),
-  heading: usize,
+  heading: Direction,
   color_index: usize
 }
 
@@ -115,35 +147,34 @@ impl Machine {
           },
           Command::MoveForward => {
             match self.heading {
-              0 => {
+              Direction::North => {
                 self.location.1 = self.location.1.wrapping_sub(1);
               },
-              45 => {
+              Direction::Northeast => {
                 self.location.0 = self.location.0.wrapping_add(1);
                 self.location.1 = self.location.1.wrapping_sub(1);
               },
-              90 => {
+              Direction::East => {
                 self.location.0 = self.location.0.wrapping_add(1);
               },
-              135 => {
+              Direction::Southeast => {
                 self.location.0 = self.location.0.wrapping_add(1);
                 self.location.1 = self.location.1.wrapping_add(1);
               },
-              180 => {
+              Direction::South => {
                 self.location.1 = self.location.1.wrapping_add(1);
               },
-              225 => {
+              Direction::Southwest => {
                 self.location.0 = self.location.0.wrapping_sub(1);
                 self.location.1 = self.location.1.wrapping_add(1);
               },
-              270 => {
+              Direction::West => {
                 self.location.0 = self.location.0.wrapping_sub(1);
               },
-              315 => {
+              Direction::Northwest => {
                 self.location.0 = self.location.0.wrapping_sub(1);
                 self.location.1 = self.location.1.wrapping_sub(1);
-              },
-              _ => ()
+              }
             }
 
             d.draw_rectangle(
@@ -153,11 +184,11 @@ impl Machine {
               4,
               Color::from_hex(
                 Machine::COLORS[self.color_index]
-              ).unwrap()
+              ).expect("Failed to parse color")
             );
           },
           Command::RotateRight => {
-            self.heading = (self.heading + 45) % 360;
+            self.heading = Direction::from((self.heading as u8 + 1) % Direction::DIRECTION_COUNT);
           },
           Command::Loop(loop_commands) => {
             (0..2).for_each(|_| self.draw_canva(d, loop_commands))
@@ -187,7 +218,7 @@ impl Machine {
     if let Some(commands) = commands {
       let mut machine: Machine = Machine {
         location: (126, 126),
-        heading: 0,
+        heading: Direction::North,
         color_index: Machine::COLORS.len() - 1
       };
   
@@ -206,98 +237,168 @@ impl Machine {
 }
 
 
+fn text_input_handling(rl: &mut RaylibHandle, input_box: Rectangle, command: &mut String, cursor_location: &mut usize) {
+  if input_box.check_collision_point_rec(rl.get_mouse_position()) {
+    rl.set_mouse_cursor(MouseCursor::MOUSE_CURSOR_IBEAM);
+  } else {
+    rl.set_mouse_cursor(MouseCursor::MOUSE_CURSOR_DEFAULT);
+  }
+
+  if (rl.is_key_down(KeyboardKey::KEY_LEFT_CONTROL) || rl.is_key_down(KeyboardKey::KEY_RIGHT_CONTROL)) && rl.is_key_pressed(KeyboardKey::KEY_C) {
+    rl.set_clipboard_text(&command).expect("Failed to copy command to clipboard");
+    return;
+  }
+
+  if (rl.is_key_down(KeyboardKey::KEY_LEFT_CONTROL) || rl.is_key_down(KeyboardKey::KEY_RIGHT_CONTROL)) && rl.is_key_pressed(KeyboardKey::KEY_V) {
+    if let Ok(cb_text) = rl.get_clipboard_text() {
+      cb_text.to_ascii_uppercase().chars().for_each(
+        |c| {
+          match c {
+            'C' | 'F' | 'R' | '[' | ']' => {
+              command.insert(
+                *cursor_location,
+                c
+              );
+              *cursor_location += 1;
+            },
+            _ => ()
+          }
+        }
+      );
+    }
+    return;
+  }
+
+  if (rl.is_key_down(KeyboardKey::KEY_LEFT_ALT) || rl.is_key_down(KeyboardKey::KEY_RIGHT_ALT)) && rl.is_key_down(KeyboardKey::KEY_RIGHT) {
+    if *cursor_location < command.len() {
+      *cursor_location += 1;
+    }
+    return;
+  }
+
+  if (rl.is_key_down(KeyboardKey::KEY_LEFT_ALT) || rl.is_key_down(KeyboardKey::KEY_RIGHT_ALT)) && rl.is_key_down(KeyboardKey::KEY_LEFT) {
+    if *cursor_location != 0 {
+      *cursor_location -= 1;
+    }
+    return;
+  }
+
+  if (rl.is_key_down(KeyboardKey::KEY_LEFT_ALT) || rl.is_key_down(KeyboardKey::KEY_RIGHT_ALT)) && rl.is_key_down(KeyboardKey::KEY_BACKSPACE) {
+    if *cursor_location == command.len() {
+      command.pop();
+    } else {
+      command.remove(*cursor_location - 1);
+    }
+    if *cursor_location != 0 {
+      *cursor_location -= 1;
+    }
+    return;
+  }
+
+  let mut key: Option<u32> = rl.get_key_pressed_number();
+
+  while let Some(key_num) = key {
+    match key_num {
+      67 | 70 | 82 | 91 | 93 => {
+        if *cursor_location == command.len() {
+          command.push(
+            char::from_u32(key_num).expect(
+              "Failed to parse keyboard input"
+            ).to_ascii_uppercase()
+          );
+        } else {
+          command.insert(
+            *cursor_location,
+            char::from_u32(key_num).expect(
+              "Failed to parse keyboard input"
+            ).to_ascii_uppercase()
+          );
+        }
+        *cursor_location += 1;
+      },
+      259 => {
+        if *cursor_location == command.len() {
+          command.pop();
+        } else {
+          command.remove(*cursor_location - 1);
+        }
+        if *cursor_location != 0 {
+          *cursor_location -= 1;
+        }
+      }
+      261 => {
+        command.clear();
+        *cursor_location = 0;
+      }
+      262 => {
+        if *cursor_location < command.len() {
+          *cursor_location += 1;
+        }
+      }
+      263 => {
+        if *cursor_location != 0 {
+          *cursor_location -= 1;
+        }
+      },
+      _ => ()
+    }
+
+    key = rl.get_key_pressed_number();
+  }
+}
+
 fn main() {
   let (mut rl, thread) = raylib::init()
     .width(1024)
-    .height(1474)
+    .height(1560)
     .title("Rust CFR[] - https://susam.net/cfr.html")
     .msaa_4x()
     .build();
 
-  rl.set_target_fps(60);
+  rl.set_target_fps(30);
 
   let mut command: String = String::new();
+  let mut cursor_location: usize = 0;
 
   let input_box: Rectangle = Rectangle {
     x: 0.0,
     y: 1024.0,
     width: 1024.0,
-    height: 470.0
+    height: 536.0
   };
   let text_box: Rectangle = Rectangle {
     x: 8.0,
     y: 1032.0,
-    width: 1024.0,
-    height: 470.0
+    width: 1022.0,
+    height: 536.0
   };
-  let mut mouse_on_text: bool;
+
+  let default_font: Font = unsafe { Font::from_raw(ffi::GetFontDefault()) };
 
   while !rl.window_should_close() {
-    if input_box.check_collision_point_rec(rl.get_mouse_position()) {
-      mouse_on_text = true;
-    } else {
-      mouse_on_text = false;
-    }
-
-    if mouse_on_text {
-      rl.set_mouse_cursor(MouseCursor::MOUSE_CURSOR_IBEAM);
-
-      let mut key: Option<u32> = rl.get_key_pressed_number();
-
-      while let Some(key_num) = key {
-        if [67, 70, 82, 91, 93].contains(&key_num) {
-          command.push(char::from_u32(key_num).unwrap().to_ascii_uppercase());
-        }
-
-        key = rl.get_key_pressed_number();
-      }
-
-      if rl.is_key_pressed(KeyboardKey::KEY_BACKSPACE) {
-        command.pop();
-      }
-
-      if (rl.is_key_down(KeyboardKey::KEY_LEFT_ALT) || rl.is_key_down(KeyboardKey::KEY_RIGHT_ALT)) && rl.is_key_down(KeyboardKey::KEY_BACKSPACE) {
-        command.pop();
-      }
-
-      if rl.is_key_pressed(KeyboardKey::KEY_DELETE) {
-        command.clear();
-      }
-
-      if rl.is_key_down(KeyboardKey::KEY_LEFT_CONTROL) || rl.is_key_down(KeyboardKey::KEY_RIGHT_CONTROL) {
-        if rl.is_key_pressed(KeyboardKey::KEY_V) {
-          if let Ok(cb_text) = rl.get_clipboard_text() {
-            for c in cb_text.to_ascii_uppercase().chars() {
-              if ['C', 'F', 'R', '[', ']'].contains(&c) {
-                command.push(c);
-              }
-            }
-          }
-        }
-      }
-    } else {
-      rl.set_mouse_cursor(MouseCursor::MOUSE_CURSOR_DEFAULT);
-    }
+    text_input_handling(&mut rl, input_box, &mut command, &mut cursor_location);
 
     let mut d: RaylibDrawHandle<'_> = rl.begin_drawing(&thread);
     
     d.clear_background(Color::BLACK);
-
+    
     Machine::run(&mut d, &command);
 
     d.draw_rectangle_rec(input_box, Color::BLACK);
-    d.draw_rectangle_lines(
-      input_box.x as i32,
-      input_box.y as i32,
-      input_box.width as i32,
-      input_box.height as i32, 
+    d.draw_rectangle_lines_ex(
+      input_box,
+      2,
       Color::LIGHTGRAY
     );
+
+    let mut command_with_cursor: String = command.clone();
+    command_with_cursor.insert(cursor_location, '_');
+
     d.draw_text_rec(
-      unsafe { Font::from_raw(ffi::GetFontDefault()) },
-      &command,
+      &default_font,
+      &command_with_cursor,
       text_box,
-      38.0,
+      40.0,
       8.0,
       true,
       Color::WHITE
